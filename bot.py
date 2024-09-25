@@ -22,7 +22,7 @@ idle_timer = {}
 loop_song = {}
 loop_queue = {}
 last_song = {}
-active_server = None  # Track the server where a song is playing
+active_server = None  # Track the server where a song is currently playing
 
 youtube_dl.utils.bug_reports_message = lambda: ''
 
@@ -76,6 +76,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 @bot.event
 async def on_ready():
     print(f'Bot is ready and logged in as {bot.user}!')
+    await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
 @bot.command(name='join')
@@ -92,37 +93,39 @@ async def leave(ctx):
     voice_client = ctx.guild.voice_client
     if voice_client:
         await voice_client.disconnect()
-        await update_presence(ctx.guild.id, None)  # Reset presence for this server
+        if ctx.guild.id == active_server:
+            await update_presence(None)  # Reset presence globally when leaving
 
 
-# Function to update the bot's rich presence based on the server
-async def update_presence(guild_id, song):
-    """Update the bot's presence to reflect the current song in the specific server."""
+# Function to update the bot's rich presence for the active server
+async def update_presence(song):
+    """Update the bot's presence to reflect the current song in the active server."""
     if song:
-        await bot.change_presence(activity=discord.Game(name=f"Playing in {guild_id}: {song.title}"))
+        await bot.change_presence(activity=discord.Game(name=f"Now Playing: {song.title}"))
     else:
-        await bot.change_presence(activity=discord.Game(name=f"Idle in {guild_id}"))
+        await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
 def play_next(ctx):
     global last_song, active_server
+    guild_id = ctx.guild.id
     try:
-        guild_id = ctx.guild.id
-        if loop_song.get(guild_id, False):
-            ctx.voice_client.play(last_song[guild_id], after=lambda e: play_next(ctx))
-        elif loop_queue.get(guild_id, False) and len(song_queue[guild_id]) > 0:
-            song_queue[guild_id].append(last_song[guild_id])
-            next_song = song_queue[guild_id].pop(0)
-            ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
-            last_song[guild_id] = next_song
-        elif len(song_queue[guild_id]) > 0:
-            next_song = song_queue[guild_id].pop(0)
-            ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
-            last_song[guild_id] = next_song
-            asyncio.run_coroutine_threadsafe(update_presence(guild_id, next_song), bot.loop)  # Update presence for this server
-        else:
-            idle_timer[guild_id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
-            asyncio.run_coroutine_threadsafe(update_presence(guild_id, None), bot.loop)  # Reset presence
+        if guild_id == active_server:  # Only update presence in the active server
+            if loop_song.get(guild_id, False):
+                ctx.voice_client.play(last_song[guild_id], after=lambda e: play_next(ctx))
+            elif loop_queue.get(guild_id, False) and len(song_queue[guild_id]) > 0:
+                song_queue[guild_id].append(last_song[guild_id])
+                next_song = song_queue[guild_id].pop(0)
+                ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+                last_song[guild_id] = next_song
+            elif len(song_queue[guild_id]) > 0:
+                next_song = song_queue[guild_id].pop(0)
+                ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+                last_song[guild_id] = next_song
+                asyncio.run_coroutine_threadsafe(update_presence(next_song), bot.loop)  # Update presence
+            else:
+                idle_timer[guild_id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
+                asyncio.run_coroutine_threadsafe(update_presence(None), bot.loop)  # Reset presence
     except Exception as e:
         print(f"An error occurred during playback: {e}")
         ctx.send(f"An error occurred: {e}. Skipping to the next song...")
@@ -132,10 +135,9 @@ def play_next(ctx):
 @bot.command(name='play')
 async def play(ctx, *, query):
     global last_song, active_server
-    try:
-        guild_id = ctx.guild.id
-        active_server = guild_id  # Set the current active server
+    guild_id = ctx.guild.id
 
+    try:
         if ctx.voice_client is None:
             if ctx.author.voice:
                 await ctx.author.voice.channel.connect()
@@ -172,7 +174,8 @@ async def play(ctx, *, query):
                 voice_channel.play(player, after=lambda e: play_next(ctx))
                 last_song[guild_id] = player
                 await ctx.send(f"Now playing: {track_name} by {artist_name}")
-                await update_presence(guild_id, player)  # Update presence for this server
+                active_server = guild_id  # Mark this as the active server for presence
+                await update_presence(player)  # Update presence for the active server
 
     except Exception as e:
         await ctx.send(f"An error occurred: {e}")
@@ -190,12 +193,14 @@ async def skip(ctx):
 
 @bot.command(name='stop')
 async def stop(ctx):
+    guild_id = ctx.guild.id
     voice_client = ctx.guild.voice_client
     if voice_client.is_playing():
         voice_client.stop()
-    song_queue[ctx.guild.id] = []
+    song_queue[guild_id] = []
     await ctx.send("Playback stopped and queue cleared.")
-    await update_presence(ctx.guild.id, None)  # Reset presence for this server
+    if guild_id == active_server:
+        await update_presence(None)  # Reset presence for this server
 
 
 @bot.command(name='queue')
@@ -312,8 +317,8 @@ async def search_song(ctx, *, query):
             else:
                 voice_channel.play(player, after=lambda e: play_next(ctx))
                 last_song[guild_id] = player
-                await ctx.send(f"Now playing: {track_name} by {artist_name}")
-                await update_presence(guild_id, player)  # Update presence for this server
+                active_server = guild_id  
+                await update_presence(player)  
 
     except Exception as e:
         await ctx.send(f"An error occurred: {e}")
