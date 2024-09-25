@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import asyncio
 import random
+import time
 
 load_dotenv()
 
@@ -36,7 +37,9 @@ ytdl_format_options = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0'
+    'source_address': '0.0.0.0',
+    'retries': 3,  # Retry on failure
+    'fragment_retries': 3  # Retry fragment downloading
 }
 
 ffmpeg_options = {
@@ -91,23 +94,29 @@ async def leave(ctx):
         await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
+# Enhanced play_next function with retry logic
 def play_next(ctx):
     global last_song
-    if loop_song:
-        ctx.voice_client.play(last_song, after=lambda e: play_next(ctx))
-    elif loop_queue and len(song_queue[ctx.guild.id]) > 0:
-        song_queue[ctx.guild.id].append(last_song)
-        next_song = song_queue[ctx.guild.id].pop(0)
-        ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
-        last_song = next_song
-    elif len(song_queue[ctx.guild.id]) > 0:
-        next_song = song_queue[ctx.guild.id].pop(0)
-        ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
-        asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name=f"Now Playing: {next_song.title}")), bot.loop)
-        last_song = next_song
-    else:
-        idle_timer[ctx.guild.id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
-        asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
+    try:
+        if loop_song:
+            ctx.voice_client.play(last_song, after=lambda e: play_next(ctx))
+        elif loop_queue and len(song_queue[ctx.guild.id]) > 0:
+            song_queue[ctx.guild.id].append(last_song)
+            next_song = song_queue[ctx.guild.id].pop(0)
+            ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+            last_song = next_song
+        elif len(song_queue[ctx.guild.id]) > 0:
+            next_song = song_queue[ctx.guild.id].pop(0)
+            ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+            asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name=f"Now Playing: {next_song.title}")), bot.loop)
+            last_song = next_song
+        else:
+            idle_timer[ctx.guild.id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
+            asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
+    except Exception as e:
+        print(f"An error occurred during playback: {e}")
+        time.sleep(3)  # Retry after a short pause
+        play_next(ctx)  # Retry playing the next song
 
 
 @bot.command(name='play')
