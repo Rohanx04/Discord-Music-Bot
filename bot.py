@@ -25,7 +25,6 @@ last_song = None
 
 youtube_dl.utils.bug_reports_message = lambda: ''
 
-# Enhance yt-dlp configuration with more retries and better error handling
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
@@ -39,9 +38,8 @@ ytdl_format_options = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'retries': 5,  # Increased retries
-    'fragment_retries': 5,  # Retry fragment downloading
-    'socket_timeout': 15  # Adding a socket timeout to prevent hanging
+    'retries': 3,  # Retry on failure
+    'fragment_retries': 3  # Retry fragment downloading
 }
 
 ffmpeg_options = {
@@ -96,7 +94,7 @@ async def leave(ctx):
         await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
-# Enhanced play_next function with fallback system
+# Enhanced play_next function with retry logic
 def play_next(ctx):
     global last_song
     try:
@@ -117,8 +115,8 @@ def play_next(ctx):
             asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
     except Exception as e:
         print(f"An error occurred during playback: {e}")
-        await ctx.send(f"An error occurred: {e}. Skipping to the next song...")
-        play_next(ctx)  # Skip to the next song
+        time.sleep(3)  # Retry after a short pause
+        play_next(ctx)  # Retry playing the next song
 
 
 @bot.command(name='play')
