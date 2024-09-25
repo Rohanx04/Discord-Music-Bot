@@ -66,6 +66,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 @bot.event
 async def on_ready():
     print(f'Bot is ready and logged in as {bot.user}!')
+    await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
 @bot.command(name='join')
@@ -82,14 +83,17 @@ async def leave(ctx):
     voice_client = ctx.guild.voice_client
     if voice_client:
         await voice_client.disconnect()
+        await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
 def play_next(ctx):
     if len(song_queue[ctx.guild.id]) > 0:
         next_song = song_queue[ctx.guild.id].pop(0)
         ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+        asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name=f"Now Playing: {next_song.title}")), bot.loop)
     else:
         asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop)
+        asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
 
 
 @bot.command(name='play')
@@ -127,6 +131,7 @@ async def play(ctx, *, query):
             else:
                 voice_channel.play(player, after=lambda e: play_next(ctx))
                 await ctx.send(f"Now playing: {track_name} by {artist_name}")
+                await bot.change_presence(activity=discord.Game(name=f"Now Playing: {track_name} by {artist_name}"))
 
     except Exception as e:
         await ctx.send(f"An error occurred: {e}")
@@ -149,6 +154,7 @@ async def stop(ctx):
         voice_client.stop()
     song_queue[ctx.guild.id] = []
     await ctx.send("Playback stopped and queue cleared.")
+    await bot.change_presence(activity=discord.Game(name="Idle"))
 
 
 bot.run(DISCORD_BOT_TOKEN)
