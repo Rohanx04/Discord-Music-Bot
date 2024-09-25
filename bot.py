@@ -1,11 +1,11 @@
 import discord
 from discord.ext import commands
-import youtube_dl
+import yt_dlp as youtube_dl  
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
 import os
-import asyncio  
+import asyncio
 
 load_dotenv()
 
@@ -19,6 +19,7 @@ youtube_dl.utils.bug_reports_message = lambda: ''
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
+    'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,
@@ -85,7 +86,6 @@ async def play(ctx, *, query):
         server = ctx.message.guild
         voice_channel = server.voice_client
 
-        # Search on Spotify
         results = sp.search(q=query, type='track', limit=1)
         if len(results['tracks']['items']) == 0:
             await ctx.send("No track found on Spotify.")
