@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import yt_dlp as youtube_dl  
+import yt_dlp as youtube_dl 
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
@@ -83,8 +83,14 @@ async def leave(ctx):
 async def play(ctx, *, query):
     """Plays music from Spotify by querying song name and artist"""
     try:
-        server = ctx.message.guild
-        voice_channel = server.voice_client
+        if ctx.voice_client is None:
+            if ctx.author.voice:
+                await ctx.author.voice.channel.connect()
+            else:
+                await ctx.send("You are not connected to a voice channel.")
+                return
+
+        voice_channel = ctx.voice_client
 
         results = sp.search(q=query, type='track', limit=1)
         if len(results['tracks']['items']) == 0:
