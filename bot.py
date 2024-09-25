@@ -16,6 +16,7 @@ SPOTIPY_CLIENT_SECRET = os.getenv('SPOTIPY_CLIENT_SECRET')
 bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 song_queue = {}
+idle_timer = {}
 
 youtube_dl.utils.bug_reports_message = lambda: ''
 
@@ -92,7 +93,7 @@ def play_next(ctx):
         ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
         asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name=f"Now Playing: {next_song.title}")), bot.loop)
     else:
-        asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop)
+        idle_timer[ctx.guild.id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
         asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
 
 
@@ -110,6 +111,9 @@ async def play(ctx, *, query):
 
         if ctx.guild.id not in song_queue:
             song_queue[ctx.guild.id] = []
+
+        if ctx.guild.id in idle_timer and idle_timer[ctx.guild.id]:
+            idle_timer[ctx.guild.id].cancel()
 
         results = sp.search(q=query, type='track', limit=1)
         if len(results['tracks']['items']) == 0:
@@ -155,6 +159,45 @@ async def stop(ctx):
     song_queue[ctx.guild.id] = []
     await ctx.send("Playback stopped and queue cleared.")
     await bot.change_presence(activity=discord.Game(name="Idle"))
+
+
+@bot.command(name='queue')
+async def show_queue(ctx):
+    if ctx.guild.id in song_queue and len(song_queue[ctx.guild.id]) > 0:
+        queue_list = [f"{i+1}. {song.title}" for i, song in enumerate(song_queue[ctx.guild.id])]
+        await ctx.send("Current queue:\n" + "\n".join(queue_list))
+    else:
+        await ctx.send("The queue is currently empty.")
+
+
+@bot.command(name='volume')
+async def volume(ctx, volume: int):
+    voice_client = ctx.guild.voice_client
+    if voice_client and voice_client.is_playing():
+        voice_client.source.volume = volume / 100
+        await ctx.send(f"Volume set to {volume}%")
+    else:
+        await ctx.send("No audio is currently playing.")
+
+
+@bot.command(name='pause')
+async def pause(ctx):
+    voice_client = ctx.guild.voice_client
+    if voice_client and voice_client.is_playing():
+        voice_client.pause()
+        await ctx.send("Playback paused.")
+    else:
+        await ctx.send("No audio is currently playing.")
+
+
+@bot.command(name='resume')
+async def resume(ctx):
+    voice_client = ctx.guild.voice_client
+    if voice_client and voice_client.is_paused():
+        voice_client.resume()
+        await ctx.send("Playback resumed.")
+    else:
+        await ctx.send("No audio is currently paused.")
 
 
 bot.run(DISCORD_BOT_TOKEN)
