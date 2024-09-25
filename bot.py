@@ -6,6 +6,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
 import os
 import asyncio
+import random
 
 load_dotenv()
 
@@ -17,6 +18,9 @@ bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 song_queue = {}
 idle_timer = {}
+loop_song = False
+loop_queue = False
+last_song = None
 
 youtube_dl.utils.bug_reports_message = lambda: ''
 
@@ -88,10 +92,19 @@ async def leave(ctx):
 
 
 def play_next(ctx):
-    if len(song_queue[ctx.guild.id]) > 0:
+    global last_song
+    if loop_song:
+        ctx.voice_client.play(last_song, after=lambda e: play_next(ctx))
+    elif loop_queue and len(song_queue[ctx.guild.id]) > 0:
+        song_queue[ctx.guild.id].append(last_song)
+        next_song = song_queue[ctx.guild.id].pop(0)
+        ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
+        last_song = next_song
+    elif len(song_queue[ctx.guild.id]) > 0:
         next_song = song_queue[ctx.guild.id].pop(0)
         ctx.voice_client.play(next_song, after=lambda e: play_next(ctx))
         asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name=f"Now Playing: {next_song.title}")), bot.loop)
+        last_song = next_song
     else:
         idle_timer[ctx.guild.id] = bot.loop.call_later(900, lambda: asyncio.run_coroutine_threadsafe(ctx.voice_client.disconnect(), bot.loop))
         asyncio.run_coroutine_threadsafe(bot.change_presence(activity=discord.Game(name="Idle")), bot.loop)
@@ -99,6 +112,7 @@ def play_next(ctx):
 
 @bot.command(name='play')
 async def play(ctx, *, query):
+    global last_song
     try:
         if ctx.voice_client is None:
             if ctx.author.voice:
@@ -134,6 +148,7 @@ async def play(ctx, *, query):
                 await ctx.send(f"Added to queue: {track_name} by {artist_name}")
             else:
                 voice_channel.play(player, after=lambda e: play_next(ctx))
+                last_song = player
                 await ctx.send(f"Now playing: {track_name} by {artist_name}")
                 await bot.change_presence(activity=discord.Game(name=f"Now Playing: {track_name} by {artist_name}"))
 
@@ -198,6 +213,83 @@ async def resume(ctx):
         await ctx.send("Playback resumed.")
     else:
         await ctx.send("No audio is currently paused.")
+
+
+@bot.command(name='loop')
+async def loop(ctx, mode: str = 'off'):
+    global loop_song, loop_queue
+    if mode == 'song':
+        loop_song = True
+        loop_queue = False
+        await ctx.send("Looping the current song.")
+    elif mode == 'queue':
+        loop_song = False
+        loop_queue = True
+        await ctx.send("Looping the queue.")
+    else:
+        loop_song = False
+        loop_queue = False
+        await ctx.send("Looping is off.")
+
+
+@bot.command(name='shuffle')
+async def shuffle(ctx):
+    if ctx.guild.id in song_queue and len(song_queue[ctx.guild.id]) > 1:
+        random.shuffle(song_queue[ctx.guild.id])
+        await ctx.send("Queue shuffled.")
+    else:
+        await ctx.send("Not enough songs in the queue to shuffle.")
+
+
+@bot.command(name='nowplaying')
+async def now_playing(ctx):
+    voice_client = ctx.guild.voice_client
+    if voice_client and voice_client.is_playing():
+        await ctx.send(f"Now playing: {last_song.title}")
+    else:
+        await ctx.send("No song is currently playing.")
+
+
+@bot.command(name='search')
+async def search_song(ctx, *, query):
+    try:
+        results = sp.search(q=query, type='track', limit=5)
+        if len(results['tracks']['items']) == 0:
+            await ctx.send("No track found on Spotify.")
+            return
+        
+        options = []
+        for i, track in enumerate(results['tracks']['items']):
+            options.append(f"{i + 1}. {track['name']} by {track['artists'][0]['name']}")
+        
+        await ctx.send(f"Select a song by number:\n" + "\n".join(options))
+
+        def check(m):
+            return m.author == ctx.author and m.channel == ctx.channel and m.content.isdigit() and 1 <= int(m.content) <= 5
+
+        response = await bot.wait_for('message', check=check)
+        selected_track = results['tracks']['items'][int(response.content) - 1]
+        
+        track_name = selected_track['name']
+        artist_name = selected_track['artists'][0]['name']
+        youtube_query = f"{track_name} {artist_name}"
+
+        async with ctx.typing():
+            player = await YTDLSource.from_url(youtube_query, loop=bot.loop, stream=True)
+
+            voice_channel = ctx.voice_client
+
+            if voice_channel.is_playing():
+                song_queue[ctx.guild.id].append(player)
+                await ctx.send(f"Added to queue: {track_name} by {artist_name}")
+            else:
+                voice_channel.play(player, after=lambda e: play_next(ctx))
+                last_song = player
+                await ctx.send(f"Now playing: {track_name} by {artist_name}")
+                await bot.change_presence(activity=discord.Game(name=f"Now Playing: {track_name} by {artist_name}"))
+
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
 
 
 bot.run(DISCORD_BOT_TOKEN)
